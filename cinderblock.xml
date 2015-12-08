@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<cinder>
+<block
+	name="Cinder-SteamVR"
+	id="org.libcinder.steamvr"
+	author="Eric Renaud-Houde"
+	license="GPL, Commercial"
+	summary="SteamVR wrapper for Cinder"
+	url="https://github.com/num3ric/Cinder-SteamVR"
+	git="git://github.com:num3ric/Cinder-SteamVR.git"
+	>
+	<supports os="msw"/>
+	<includePath>include</includePath>
+	<includePath>openvr/headers</includePath>
+    
+    <headerPattern>include/*.h</headerPattern>
+    <sourcePattern>src/*.cpp</sourcePattern>
+    
+	<platform os="msw">
+		<staticLibrary>openvr/lib/win64/openvr_api.lib</staticLibrary>
+	</platform>
+</block>
+</cinder>
