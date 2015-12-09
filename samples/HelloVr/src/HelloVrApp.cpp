@@ -5,6 +5,13 @@
 
 #include "openvr.h"
 
+struct Session {
+	Session() { }
+	~Session() {
+		vr::VR_Shutdown();
+	}
+};
+
 using namespace ci;
 using namespace ci::app;
 using namespace std;
@@ -36,16 +43,14 @@ public:
 	void update() override;
 	void draw() override;
 	void cleanup() override;
+	void keyDown( KeyEvent event ) override;
 
-	bool BInit();
 	bool BInitGL();
 	bool BInitCompositor();
 
 	void SetupRenderModels();
 
-	bool HandleInput();
 	void ProcessVREvent( const vr::VREvent_t & event );
-	void RenderFrame();
 
 	bool SetupTexturemaps();
 
@@ -74,8 +79,10 @@ public:
 	bool CreateAllShaders();
 
 	void SetupRenderModelForTrackedDevice( vr::TrackedDeviceIndex_t unTrackedDeviceIndex );
+	
 	CGLRenderModel *FindOrLoadRenderModel( const char *pchRenderModelName );
 
+	static Session kSession;
 private:
 	bool m_bDebugOpenGL;
 	bool m_bVerbose;
@@ -182,6 +189,22 @@ private: // OpenGL bookkeeping
 	CGLRenderModel *m_rTrackedDeviceToRenderModel[vr::k_unMaxTrackedDeviceCount];
 };
 
+//-----------------------------------------------------------------------------
+// Purpose: Helper to get a string from a tracked device property and turn it
+//			into a std::string
+//-----------------------------------------------------------------------------
+std::string GetTrackedDeviceString( vr::IVRSystem *pHmd, vr::TrackedDeviceIndex_t unDevice, vr::TrackedDeviceProperty prop, vr::TrackedPropertyError *peError = NULL )
+{
+	uint32_t unRequiredBufferLen = pHmd->GetStringTrackedDeviceProperty( unDevice, prop, NULL, 0, peError );
+	if( unRequiredBufferLen == 0 )
+		return "";
+
+	char *pchBuffer = new char[unRequiredBufferLen];
+	unRequiredBufferLen = pHmd->GetStringTrackedDeviceProperty( unDevice, prop, pchBuffer, unRequiredBufferLen, peError );
+	std::string sResult = pchBuffer;
+	delete[] pchBuffer;
+	return sResult;
+}
 
 HelloVrApp::HelloVrApp()
 	: m_nWindowWidth( 1280 )
@@ -217,33 +240,6 @@ HelloVrApp::HelloVrApp()
 
 	gl::enableVerticalSync( false );
 
-	BInit();
-};
-
-//-----------------------------------------------------------------------------
-// Purpose: Helper to get a string from a tracked device property and turn it
-//			into a std::string
-//-----------------------------------------------------------------------------
-std::string GetTrackedDeviceString( vr::IVRSystem *pHmd, vr::TrackedDeviceIndex_t unDevice, vr::TrackedDeviceProperty prop, vr::TrackedPropertyError *peError = NULL )
-{
-	uint32_t unRequiredBufferLen = pHmd->GetStringTrackedDeviceProperty( unDevice, prop, NULL, 0, peError );
-	if( unRequiredBufferLen == 0 )
-		return "";
-
-	char *pchBuffer = new char[unRequiredBufferLen];
-	unRequiredBufferLen = pHmd->GetStringTrackedDeviceProperty( unDevice, prop, pchBuffer, unRequiredBufferLen, peError );
-	std::string sResult = pchBuffer;
-	delete[] pchBuffer;
-	return sResult;
-}
-
-
-//-----------------------------------------------------------------------------
-// Purpose:
-//-----------------------------------------------------------------------------
-bool HelloVrApp::BInit()
-{
-
 	// Loading the SteamVR Runtime
 	vr::EVRInitError eError = vr::VRInitError_None;
 	m_pHMD = vr::VR_Init( &eError, vr::VRApplication_Scene );
@@ -251,7 +247,7 @@ bool HelloVrApp::BInit()
 	if( eError != vr::VRInitError_None ) {
 		m_pHMD = NULL;
 		CI_LOG_E( "Unable to init VR runtime: " << vr::VR_GetVRInitErrorAsEnglishDescription( eError ) );
-		return false;
+		quit();
 	}
 
 
@@ -261,7 +257,7 @@ bool HelloVrApp::BInit()
 		vr::VR_Shutdown();
 
 		CI_LOG_E( "Unable to get render model interface: " << vr::VR_GetVRInitErrorAsEnglishDescription( eError ) );
-		return false;
+		quit();
 	}
 
 	int nWindowPosX = 700;
@@ -293,37 +289,22 @@ bool HelloVrApp::BInit()
 
 	m_uiVertcount = 0;
 
-	// 		m_MillisecondsTimer.start(1, this);
-	// 		m_SecondsTimer.start(1000, this);
-
-	if( !BInitGL() )
-	{
-		printf( "%s - Unable to initialize OpenGL!\n", __FUNCTION__ );
-		return false;
+	if( !BInitGL() ) {
+		CI_LOG_E( "Unable to initialize OpenGL!" );
+		quit();
 	}
 
-	if( !BInitCompositor() )
-	{
-		printf( "%s - Failed to initialize VR Compositor!\n", __FUNCTION__ );
-		return false;
+	if( !BInitCompositor() ) {
+		CI_LOG_E( "Failed to initialize VR Compositor!" );
+		quit();
 	}
+};
 
-	return true;
-}
-
-
-//-----------------------------------------------------------------------------
-// Purpose:
-//-----------------------------------------------------------------------------
 void APIENTRY DebugCallback( GLenum source, GLenum type, GLuint id, GLenum severity, GLsizei length, const char* message, const void* userParam )
 {
 	CI_LOG_I( "GL Error: " << message );
 }
 
-
-//-----------------------------------------------------------------------------
-// Purpose:
-//-----------------------------------------------------------------------------
 bool HelloVrApp::BInitGL()
 {
 	if( m_bDebugOpenGL )
@@ -365,34 +346,6 @@ bool HelloVrApp::BInitCompositor()
 }
 
 //-----------------------------------------------------------------------------
-// Purpose:
-//-----------------------------------------------------------------------------
-bool HelloVrApp::HandleInput()
-{
-	bool bRet = true;
-
-	// Process SteamVR events
-	vr::VREvent_t event;
-	while( m_pHMD->PollNextEvent( &event ) )
-	{
-		ProcessVREvent( event );
-	}
-
-	// Process SteamVR controller state
-	for( vr::TrackedDeviceIndex_t unDevice = 0; unDevice < vr::k_unMaxTrackedDeviceCount; unDevice++ )
-	{
-		vr::VRControllerState_t state;
-		if( m_pHMD->GetControllerState( unDevice, &state ) )
-		{
-			m_rbShowTrackedDevice[unDevice] = state.ulButtonPressed == 0;
-		}
-	}
-
-	return bRet;
-}
-
-
-//-----------------------------------------------------------------------------
 // Purpose: Processes a single VR event
 //-----------------------------------------------------------------------------
 void HelloVrApp::ProcessVREvent( const vr::VREvent_t & event )
@@ -417,65 +370,6 @@ void HelloVrApp::ProcessVREvent( const vr::VREvent_t & event )
 	break;
 	}
 }
-
-
-//-----------------------------------------------------------------------------
-// Purpose:
-//-----------------------------------------------------------------------------
-void HelloVrApp::RenderFrame()
-{
-	// for now as fast as possible
-	if( m_pHMD )
-	{
-		DrawControllers();
-		RenderStereoTargets();
-		RenderDistortion();
-
-		vr::Texture_t leftEyeTexture = { (void*)leftEyeDesc.m_nResolveTextureId, vr::API_OpenGL, vr::ColorSpace_Gamma };
-		vr::VRCompositor()->Submit( vr::Eye_Left, &leftEyeTexture );
-		vr::Texture_t rightEyeTexture = { (void*)rightEyeDesc.m_nResolveTextureId, vr::API_OpenGL, vr::ColorSpace_Gamma };
-		vr::VRCompositor()->Submit( vr::Eye_Right, &rightEyeTexture );
-	}
-
-	//if( m_bVblank && m_bGlFinishHack )
-	//{
-	//	//$ HACKHACK. From gpuview profiling, it looks like there is a bug where two renders and a present
-	//	// happen right before and after the vsync causing all kinds of jittering issues. This glFinish()
-	//	// appears to clear that up. Temporary fix while I try to get nvidia to investigate this problem.
-	//	// 1/29/2014 mikesart
-	//	glFinish();
-	//}
-
-	//// SwapWindow
-	//{
-	//	SDL_GL_SwapWindow( m_pWindow );
-	//}
-
-	//// Clear
-	//{
-	//	// We want to make sure the glFinish waits for the entire present to complete, not just the submission
-	//	// of the command. So, we do a clear here right here so the glFinish will wait fully for the swap.
-	//	glClearColor( 0, 0, 0, 1 );
-	//	glClear( GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT );
-	//}
-
-	//// Flush and wait for swap.
-	//if( m_bVblank )
-	//{
-	//	glFlush();
-	//	glFinish();
-	//}
-
-	// Spew out the controller and pose count whenever they change.
-	if( m_iTrackedControllerCount != m_iTrackedControllerCount_Last || m_iValidPoseCount != m_iValidPoseCount_Last )
-	{
-		m_iValidPoseCount_Last = m_iValidPoseCount;
-		m_iTrackedControllerCount_Last = m_iTrackedControllerCount;
-
-		//CI_LOG_I( "PoseCount:%d(%s) Controllers:%d\n", m_iValidPoseCount, m_strPoseClasses.c_str(), m_iTrackedControllerCount );
-	}
-}
-
 
 //-----------------------------------------------------------------------------
 // Purpose: Compiles a GL shader program and returns the handle. Returns 0 if
@@ -690,10 +584,6 @@ bool HelloVrApp::CreateAllShaders()
 		&& m_unLensProgramID != 0;
 }
 
-
-//-----------------------------------------------------------------------------
-// Purpose:
-//-----------------------------------------------------------------------------
 bool HelloVrApp::SetupTexturemaps()
 {
 	GLfloat fLargest;
@@ -765,10 +655,6 @@ void HelloVrApp::SetupScene()
 
 }
 
-
-//-----------------------------------------------------------------------------
-// Purpose:
-//-----------------------------------------------------------------------------
 void HelloVrApp::AddCubeVertex( float fl0, float fl1, float fl2, float fl3, float fl4, std::vector<float> &vertdata )
 {
 	vertdata.push_back( fl0 );
@@ -778,10 +664,6 @@ void HelloVrApp::AddCubeVertex( float fl0, float fl1, float fl2, float fl3, floa
 	vertdata.push_back( fl4 );
 }
 
-
-//-----------------------------------------------------------------------------
-// Purpose:
-//-----------------------------------------------------------------------------
 void HelloVrApp::AddCubeToScene( glm::mat4 mat, std::vector<float> &vertdata )
 {
 	// glm::mat4 mat( outermat.data() );
@@ -1145,10 +1027,6 @@ void HelloVrApp::SetupDistortion()
 	glBindBuffer( GL_ELEMENT_ARRAY_BUFFER, 0 );
 }
 
-
-//-----------------------------------------------------------------------------
-// Purpose:
-//-----------------------------------------------------------------------------
 void HelloVrApp::RenderStereoTargets()
 {
 	glClearColor( 0.15f, 0.15f, 0.18f, 1.0f ); // nice background color, but not black
@@ -1193,10 +1071,6 @@ void HelloVrApp::RenderStereoTargets()
 	glBindFramebuffer( GL_DRAW_FRAMEBUFFER, 0 );
 }
 
-
-//-----------------------------------------------------------------------------
-// Purpose:
-//-----------------------------------------------------------------------------
 void HelloVrApp::RenderScene( vr::Hmd_Eye nEye )
 {
 	glClear( GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT );
@@ -1249,10 +1123,6 @@ void HelloVrApp::RenderScene( vr::Hmd_Eye nEye )
 	glUseProgram( 0 );
 }
 
-
-//-----------------------------------------------------------------------------
-// Purpose:
-//-----------------------------------------------------------------------------
 void HelloVrApp::RenderDistortion()
 {
 	glDisable( GL_DEPTH_TEST );
@@ -1281,10 +1151,6 @@ void HelloVrApp::RenderDistortion()
 	glUseProgram( 0 );
 }
 
-
-//-----------------------------------------------------------------------------
-// Purpose:
-//-----------------------------------------------------------------------------
 glm::mat4 HelloVrApp::GetHMDMatrixProjectionEye( vr::Hmd_Eye nEye )
 {
 	if( !m_pHMD )
@@ -1300,10 +1166,6 @@ glm::mat4 HelloVrApp::GetHMDMatrixProjectionEye( vr::Hmd_Eye nEye )
 		);
 }
 
-
-//-----------------------------------------------------------------------------
-// Purpose:
-//-----------------------------------------------------------------------------
 glm::mat4 HelloVrApp::GetHMDMatrixPoseEye( vr::Hmd_Eye nEye )
 {
 	if( !m_pHMD )
@@ -1320,10 +1182,6 @@ glm::mat4 HelloVrApp::GetHMDMatrixPoseEye( vr::Hmd_Eye nEye )
 	return glm::inverse( matrixObj );
 }
 
-
-//-----------------------------------------------------------------------------
-// Purpose:
-//-----------------------------------------------------------------------------
 glm::mat4 HelloVrApp::GetCurrentViewProjectionMatrix( vr::Hmd_Eye nEye )
 {
 	glm::mat4 matMVP;
@@ -1339,10 +1197,6 @@ glm::mat4 HelloVrApp::GetCurrentViewProjectionMatrix( vr::Hmd_Eye nEye )
 	return matMVP;
 }
 
-
-//-----------------------------------------------------------------------------
-// Purpose:
-//-----------------------------------------------------------------------------
 void HelloVrApp::UpdateHMDMatrixPose()
 {
 	if( !m_pHMD )
@@ -1380,10 +1234,6 @@ void HelloVrApp::UpdateHMDMatrixPose()
 	}
 }
 
-
-//-----------------------------------------------------------------------------
-// Purpose: Finds a render model we've already loaded or loads a new one
-//-----------------------------------------------------------------------------
 CGLRenderModel *HelloVrApp::FindOrLoadRenderModel( const char *pchRenderModelName )
 {
 	CGLRenderModel *pRenderModel = NULL;
@@ -1605,26 +1455,87 @@ void HelloVrApp::mouseDown( MouseEvent event )
 
 void HelloVrApp::update()
 {
+	// Process SteamVR events
+	vr::VREvent_t event;
+	while( m_pHMD->PollNextEvent( &event ) )
+	{
+		ProcessVREvent( event );
+	}
 
-	bool bQuit = false;
-	while( !bQuit ) {
-		bQuit = HandleInput();
+	// Process SteamVR controller state
+	for( vr::TrackedDeviceIndex_t unDevice = 0; unDevice < vr::k_unMaxTrackedDeviceCount; unDevice++ )
+	{
+		vr::VRControllerState_t state;
+		if( m_pHMD->GetControllerState( unDevice, &state ) )
+		{
+			m_rbShowTrackedDevice[unDevice] = state.ulButtonPressed == 0;
+		}
 	}
 }
 
 void HelloVrApp::draw()
 {
 	UpdateHMDMatrixPose();
-	RenderFrame();
+	
+	// for now as fast as possible
+	if( m_pHMD )
+	{
+		DrawControllers();
+		RenderStereoTargets();
+		RenderDistortion();
+
+		vr::Texture_t leftEyeTexture = { (void*)leftEyeDesc.m_nResolveTextureId, vr::API_OpenGL, vr::ColorSpace_Gamma };
+		vr::VRCompositor()->Submit( vr::Eye_Left, &leftEyeTexture );
+		vr::Texture_t rightEyeTexture = { (void*)rightEyeDesc.m_nResolveTextureId, vr::API_OpenGL, vr::ColorSpace_Gamma };
+		vr::VRCompositor()->Submit( vr::Eye_Right, &rightEyeTexture );
+	}
+
+	//if( m_bVblank && m_bGlFinishHack )
+	//{
+	//	//$ HACKHACK. From gpuview profiling, it looks like there is a bug where two renders and a present
+	//	// happen right before and after the vsync causing all kinds of jittering issues. This glFinish()
+	//	// appears to clear that up. Temporary fix while I try to get nvidia to investigate this problem.
+	//	// 1/29/2014 mikesart
+	//	glFinish();
+	//}
+
+	//// SwapWindow
+	//{
+	//	SDL_GL_SwapWindow( m_pWindow );
+	//}
+
+	//// Clear
+	//{
+	//	// We want to make sure the glFinish waits for the entire present to complete, not just the submission
+	//	// of the command. So, we do a clear here right here so the glFinish will wait fully for the swap.
+	//	glClearColor( 0, 0, 0, 1 );
+	//	glClear( GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT );
+	//}
+
+	//// Flush and wait for swap.
+	//if( m_bVblank )
+	//{
+	//	glFlush();
+	//	glFinish();
+	//}
+
+	// Spew out the controller and pose count whenever they change.
+	if( m_iTrackedControllerCount != m_iTrackedControllerCount_Last || m_iValidPoseCount != m_iValidPoseCount_Last )
+	{
+		m_iValidPoseCount_Last = m_iValidPoseCount;
+		m_iTrackedControllerCount_Last = m_iTrackedControllerCount;
+
+		//CI_LOG_I( "PoseCount:%d(%s) Controllers:%d\n", m_iValidPoseCount, m_strPoseClasses.c_str(), m_iTrackedControllerCount );
+	}
 }
 
 void HelloVrApp::cleanup()
 {
-	if( m_pHMD )
-	{
-		vr::VR_Shutdown();
-		m_pHMD = NULL;
-	}
+	//if( m_pHMD )
+	//{
+	//	//vr::VR_Shutdown();
+	//	m_pHMD = NULL;
+	//}
 
 	for( std::vector< CGLRenderModel * >::iterator i = m_vecRenderModels.begin(); i != m_vecRenderModels.end(); i++ )
 	{
@@ -1681,6 +1592,13 @@ void HelloVrApp::cleanup()
 		{
 			glDeleteVertexArrays( 1, &m_unControllerVAO );
 		}
+	}
+}
+
+void HelloVrApp::keyDown( KeyEvent event )
+{
+	if( event.getCode() == KeyEvent::KEY_ESCAPE ) {
+		quit();
 	}
 }
 
