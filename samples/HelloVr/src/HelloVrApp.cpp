@@ -52,11 +52,7 @@ public:
 
 	void ProcessVREvent( const vr::VREvent_t & event );
 
-	bool SetupTexturemaps();
-
 	void SetupScene();
-	void AddCubeToScene( glm::mat4 mat, std::vector<float> &vertdata );
-	void AddCubeVertex( float fl0, float fl1, float fl2, float fl3, float fl4, std::vector<float> &vertdata );
 
 	void DrawControllers();
 
@@ -107,7 +103,6 @@ private: // OpenGL bookkeeping
 	int m_iTrackedControllerCount_Last;
 	int m_iValidPoseCount;
 	int m_iValidPoseCount_Last;
-	bool m_bShowCubes;
 
 	std::string m_strPoseClasses;                            // what classes we saw poses for this frame
 	char m_rDevClassChar[vr::k_unMaxTrackedDeviceCount];   // for each device, a character representing its class
@@ -123,12 +118,12 @@ private: // OpenGL bookkeeping
 	float m_fNearClip;
 	float m_fFarClip;
 
-	gl::Texture2dRef mCubeTexture;
+	gl::Texture2dRef	mCubeTexture;
+	gl::BatchRef		mCubeBatch;
+	gl::GlslProgRef		mCubeGlsl;
 
 	unsigned int m_uiVertcount;
 
-	GLuint m_glSceneVertBuffer;
-	GLuint m_unSceneVAO;
 	GLuint m_unLensVAO;
 	GLuint m_glIDVertBuffer;
 	GLuint m_glIDIndexBuffer;
@@ -160,12 +155,10 @@ private: // OpenGL bookkeeping
 		glm::vec2 texCoordBlue;
 	};
 
-	GLuint m_unSceneProgramID;
 	GLuint m_unLensProgramID;
 	GLuint m_unControllerTransformProgramID;
 	GLuint m_unRenderModelProgramID;
 
-	GLint m_nSceneMatrixLocation;
 	GLint m_nControllerMatrixLocation;
 	GLint m_nRenderModelMatrixLocation;
 
@@ -209,7 +202,6 @@ std::string GetTrackedDeviceString( vr::IVRSystem *pHmd, vr::TrackedDeviceIndex_
 HelloVrApp::HelloVrApp()
 	: m_nWindowWidth( 1280 )
 	, m_nWindowHeight( 720 )
-	, m_unSceneProgramID( 0 )
 	, m_unLensProgramID( 0 )
 	, m_unControllerTransformProgramID( 0 )
 	, m_unRenderModelProgramID( 0 )
@@ -223,8 +215,6 @@ HelloVrApp::HelloVrApp()
 	, m_glControllerVertBuffer( 0 )
 	, m_unControllerVAO( 0 )
 	, m_unLensVAO( 0 )
-	, m_unSceneVAO( 0 )
-	, m_nSceneMatrixLocation( -1 )
 	, m_nControllerMatrixLocation( -1 )
 	, m_nRenderModelMatrixLocation( -1 )
 	, m_iTrackedControllerCount( 0 )
@@ -233,7 +223,6 @@ HelloVrApp::HelloVrApp()
 	, m_iValidPoseCount_Last( -1 )
 	, m_iSceneVolumeInit( 20 )
 	, m_strPoseClasses( "" )
-	, m_bShowCubes( true )
 {
 	// other initialization tasks are done in BInit
 	memset( m_rDevClassChar, 0, sizeof( m_rDevClassChar ) );
@@ -282,7 +271,7 @@ HelloVrApp::HelloVrApp()
 	m_iSceneVolumeDepth = m_iSceneVolumeInit;
 
 	m_fScale = 0.3f;
-	m_fScaleSpacing = 4.0f;
+	m_fScaleSpacing = 2.0f;
 
 	m_fNearClip = 0.1f;
 	m_fFarClip = 30.0f;
@@ -317,8 +306,8 @@ bool HelloVrApp::BInitGL()
 	if( !CreateAllShaders() )
 		return false;
 
-	SetupTexturemaps();
 	SetupScene();
+
 	SetupCameras();
 	SetupStereoRenderTargets();
 	SetupDistortion();
@@ -435,38 +424,6 @@ GLuint HelloVrApp::CompileGLShader( const char *pchShaderName, const char *pchVe
 //-----------------------------------------------------------------------------
 bool HelloVrApp::CreateAllShaders()
 {
-	m_unSceneProgramID = CompileGLShader(
-		"Scene",
-
-		// Vertex Shader
-		"#version 410\n"
-		"uniform mat4 matrix;\n"
-		"layout(location = 0) in vec4 position;\n"
-		"layout(location = 1) in vec2 v2UVcoordsIn;\n"
-		"layout(location = 2) in vec3 v3NormalIn;\n"
-		"out vec2 v2UVcoords;\n"
-		"void main()\n"
-		"{\n"
-		"	v2UVcoords = v2UVcoordsIn;\n"
-		"	gl_Position = matrix * position;\n"
-		"}\n",
-
-		// Fragment Shader
-		"#version 410 core\n"
-		"uniform sampler2D mytexture;\n"
-		"in vec2 v2UVcoords;\n"
-		"out vec4 outputColor;\n"
-		"void main()\n"
-		"{\n"
-		"   outputColor = texture(mytexture, v2UVcoords);\n"
-		"}\n"
-		);
-	m_nSceneMatrixLocation = glGetUniformLocation( m_unSceneProgramID, "matrix" );
-	if( m_nSceneMatrixLocation == -1 )
-	{
-		CI_LOG_E( "Unable to find matrix uniform in scene shader\n" );
-		return false;
-	}
 
 	m_unControllerTransformProgramID = CompileGLShader(
 		"Controller",
@@ -578,13 +535,15 @@ bool HelloVrApp::CreateAllShaders()
 		);
 
 
-	return m_unSceneProgramID != 0
-		&& m_unControllerTransformProgramID != 0
+	return m_unControllerTransformProgramID != 0
 		&& m_unRenderModelProgramID != 0
 		&& m_unLensProgramID != 0;
 }
 
-bool HelloVrApp::SetupTexturemaps()
+//-----------------------------------------------------------------------------
+// Purpose: create a sea of cubes
+//-----------------------------------------------------------------------------
+void HelloVrApp::SetupScene()
 {
 	GLfloat fLargest;
 	glGetFloatv( GL_MAX_TEXTURE_MAX_ANISOTROPY_EXT, &fLargest );
@@ -593,134 +552,27 @@ bool HelloVrApp::SetupTexturemaps()
 	fmt.mipmap( true );
 	fmt.loadTopDown();
 	mCubeTexture = gl::Texture2d::create( loadImage( loadAsset( "cube_texture.png" ) ), fmt );
-	return true;
-}
+	auto cubeMesh = gl::VboMesh::create( geom::Cube().size( vec3(0.5) ) );
 
+	mCubeGlsl = gl::GlslProg::create( gl::GlslProg::Format().vertex( loadAsset( "cube.vert" ) ).fragment( loadAsset( "cube.frag" ) ) );
+	mCubeGlsl->uniform( "uTex0", 0 );
 
-//-----------------------------------------------------------------------------
-// Purpose: create a sea of cubes
-//-----------------------------------------------------------------------------
-void HelloVrApp::SetupScene()
-{
-	if( !m_pHMD )
-		return;
-
-	std::vector<float> vertdataarray;
-
-	glm::mat4 matScale = glm::scale( vec3( m_fScale ) );
-	glm::mat4 matTransform = glm::translate( vec3(
-		-((float)m_iSceneVolumeWidth * m_fScaleSpacing) / 2.f,
-		-((float)m_iSceneVolumeHeight * m_fScaleSpacing) / 2.f,
-		-((float)m_iSceneVolumeDepth * m_fScaleSpacing) / 2.f ) );
-
-	glm::mat4 mat = matScale * matTransform;
-
-	for( int z = 0; z< m_iSceneVolumeDepth; z++ )
-	{
-		for( int y = 0; y< m_iSceneVolumeHeight; y++ )
-		{
-			for( int x = 0; x< m_iSceneVolumeWidth; x++ )
-			{
-				AddCubeToScene( mat, vertdataarray );
-				mat = mat * glm::translate( vec3( m_fScaleSpacing, 0, 0 ) );
+	// create an array of initial per-instance positions laid out in a 2D grid
+	std::vector<vec3> positions;
+	for( int z = -10; z <= 10; z++ ) {
+		for( int y = -10; y <= 10; y++ ) {
+			for( int x = -10; x <= 10; x++ ) {
+				positions.emplace_back( vec3( m_fScaleSpacing * x, m_fScaleSpacing * y, m_fScaleSpacing * z ) );
 			}
-			mat = mat * glm::translate( vec3( -((float)m_iSceneVolumeWidth) * m_fScaleSpacing, m_fScaleSpacing, 0 ) );
 		}
-		mat = mat * glm::translate( vec3( 0, -((float)m_iSceneVolumeHeight) * m_fScaleSpacing, m_fScaleSpacing ) );
 	}
-	m_uiVertcount = vertdataarray.size() / 5;
+	auto instanceDataVbo = gl::Vbo::create( GL_ARRAY_BUFFER, positions.size() * sizeof( vec3 ), positions.data(), GL_STATIC_DRAW );
+	geom::BufferLayout instanceDataLayout;
+	instanceDataLayout.append( geom::Attrib::CUSTOM_0, 3, 0, 0, 1 /* per instance */ );
+	cubeMesh->appendVbo( instanceDataLayout, instanceDataVbo );
 
-	glGenVertexArrays( 1, &m_unSceneVAO );
-	glBindVertexArray( m_unSceneVAO );
-
-	glGenBuffers( 1, &m_glSceneVertBuffer );
-	glBindBuffer( GL_ARRAY_BUFFER, m_glSceneVertBuffer );
-	glBufferData( GL_ARRAY_BUFFER, sizeof( float ) * vertdataarray.size(), &vertdataarray[0], GL_STATIC_DRAW );
-
-	glBindBuffer( GL_ARRAY_BUFFER, m_glSceneVertBuffer );
-
-	GLsizei stride = sizeof( VertexDataScene );
-	uintptr_t offset = 0;
-
-	glEnableVertexAttribArray( 0 );
-	glVertexAttribPointer( 0, 3, GL_FLOAT, GL_FALSE, stride, (const void *)offset );
-
-	offset += sizeof( glm::vec3 );
-	glEnableVertexAttribArray( 1 );
-	glVertexAttribPointer( 1, 2, GL_FLOAT, GL_FALSE, stride, (const void *)offset );
-
-	glBindVertexArray( 0 );
-	glDisableVertexAttribArray( 0 );
-	glDisableVertexAttribArray( 1 );
-
+	mCubeBatch = gl::Batch::create( cubeMesh, mCubeGlsl, { { geom::Attrib::CUSTOM_0, "vInstancePosition" } } );
 }
-
-void HelloVrApp::AddCubeVertex( float fl0, float fl1, float fl2, float fl3, float fl4, std::vector<float> &vertdata )
-{
-	vertdata.push_back( fl0 );
-	vertdata.push_back( fl1 );
-	vertdata.push_back( fl2 );
-	vertdata.push_back( fl3 );
-	vertdata.push_back( fl4 );
-}
-
-void HelloVrApp::AddCubeToScene( glm::mat4 mat, std::vector<float> &vertdata )
-{
-	// glm::mat4 mat( outermat.data() );
-
-	vec4 A = mat * vec4( 0, 0, 0, 1 );
-	vec4 B = mat * vec4( 1, 0, 0, 1 );
-	vec4 C = mat * vec4( 1, 1, 0, 1 );
-	vec4 D = mat * vec4( 0, 1, 0, 1 );
-	vec4 E = mat * vec4( 0, 0, 1, 1 );
-	vec4 F = mat * vec4( 1, 0, 1, 1 );
-	vec4 G = mat * vec4( 1, 1, 1, 1 );
-	vec4 H = mat * vec4( 0, 1, 1, 1 );
-
-	// triangles instead of quads
-	AddCubeVertex( E.x, E.y, E.z, 0, 1, vertdata ); //Front
-	AddCubeVertex( F.x, F.y, F.z, 1, 1, vertdata );
-	AddCubeVertex( G.x, G.y, G.z, 1, 0, vertdata );
-	AddCubeVertex( G.x, G.y, G.z, 1, 0, vertdata );
-	AddCubeVertex( H.x, H.y, H.z, 0, 0, vertdata );
-	AddCubeVertex( E.x, E.y, E.z, 0, 1, vertdata );
-
-	AddCubeVertex( B.x, B.y, B.z, 0, 1, vertdata ); //Back
-	AddCubeVertex( A.x, A.y, A.z, 1, 1, vertdata );
-	AddCubeVertex( D.x, D.y, D.z, 1, 0, vertdata );
-	AddCubeVertex( D.x, D.y, D.z, 1, 0, vertdata );
-	AddCubeVertex( C.x, C.y, C.z, 0, 0, vertdata );
-	AddCubeVertex( B.x, B.y, B.z, 0, 1, vertdata );
-
-	AddCubeVertex( H.x, H.y, H.z, 0, 1, vertdata ); //Top
-	AddCubeVertex( G.x, G.y, G.z, 1, 1, vertdata );
-	AddCubeVertex( C.x, C.y, C.z, 1, 0, vertdata );
-	AddCubeVertex( C.x, C.y, C.z, 1, 0, vertdata );
-	AddCubeVertex( D.x, D.y, D.z, 0, 0, vertdata );
-	AddCubeVertex( H.x, H.y, H.z, 0, 1, vertdata );
-
-	AddCubeVertex( A.x, A.y, A.z, 0, 1, vertdata ); //Bottom
-	AddCubeVertex( B.x, B.y, B.z, 1, 1, vertdata );
-	AddCubeVertex( F.x, F.y, F.z, 1, 0, vertdata );
-	AddCubeVertex( F.x, F.y, F.z, 1, 0, vertdata );
-	AddCubeVertex( E.x, E.y, E.z, 0, 0, vertdata );
-	AddCubeVertex( A.x, A.y, A.z, 0, 1, vertdata );
-
-	AddCubeVertex( A.x, A.y, A.z, 0, 1, vertdata ); //Left
-	AddCubeVertex( E.x, E.y, E.z, 1, 1, vertdata );
-	AddCubeVertex( H.x, H.y, H.z, 1, 0, vertdata );
-	AddCubeVertex( H.x, H.y, H.z, 1, 0, vertdata );
-	AddCubeVertex( D.x, D.y, D.z, 0, 0, vertdata );
-	AddCubeVertex( A.x, A.y, A.z, 0, 1, vertdata );
-
-	AddCubeVertex( F.x, F.y, F.z, 0, 1, vertdata ); //Right
-	AddCubeVertex( B.x, B.y, B.z, 1, 1, vertdata );
-	AddCubeVertex( C.x, C.y, C.z, 1, 0, vertdata );
-	AddCubeVertex( C.x, C.y, C.z, 1, 0, vertdata );
-	AddCubeVertex( G.x, G.y, G.z, 0, 0, vertdata );
-	AddCubeVertex( F.x, F.y, F.z, 0, 1, vertdata );
-}
-
 
 //-----------------------------------------------------------------------------
 // Purpose: Draw all of the controllers as X/Y/Z lines
@@ -1076,15 +928,19 @@ void HelloVrApp::RenderScene( vr::Hmd_Eye nEye )
 	glClear( GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT );
 	glEnable( GL_DEPTH_TEST );
 
-	if( m_bShowCubes )
+	if( nEye == vr::Eye_Left )
 	{
-		glUseProgram( m_unSceneProgramID );
-		glUniformMatrix4fv( m_nSceneMatrixLocation, 1, GL_FALSE, glm::value_ptr( GetCurrentViewProjectionMatrix( nEye ) ) );
-		glBindVertexArray( m_unSceneVAO );
-		glBindTexture( GL_TEXTURE_2D, mCubeTexture->getId() );
-		glDrawArrays( GL_TRIANGLES, 0, m_uiVertcount );
-		glBindVertexArray( 0 );
+		gl::setViewMatrix( m_mat4eyePosLeft * m_mat4HMDPose );
+		gl::setProjectionMatrix( m_mat4ProjectionLeft );
 	}
+	else if( nEye == vr::Eye_Right )
+	{
+		gl::setViewMatrix( m_mat4eyePosRight * m_mat4HMDPose );
+		gl::setProjectionMatrix( m_mat4ProjectionRight );
+	}
+
+	gl::ScopedTextureBind tex0{ mCubeTexture, 0 };
+	mCubeBatch->drawInstanced( 21 * 21 * 21 );
 
 	bool bIsInputCapturedByAnotherProcess = m_pHMD->IsInputFocusCapturedByAnotherProcess();
 
@@ -1547,14 +1403,9 @@ void HelloVrApp::cleanup()
 	{
 		glDebugMessageControl( GL_DONT_CARE, GL_DONT_CARE, GL_DONT_CARE, 0, nullptr, GL_FALSE );
 		glDebugMessageCallback( nullptr, nullptr );
-		glDeleteBuffers( 1, &m_glSceneVertBuffer );
 		glDeleteBuffers( 1, &m_glIDVertBuffer );
 		glDeleteBuffers( 1, &m_glIDIndexBuffer );
 
-		if( m_unSceneProgramID )
-		{
-			glDeleteProgram( m_unSceneProgramID );
-		}
 		if( m_unControllerTransformProgramID )
 		{
 			glDeleteProgram( m_unControllerTransformProgramID );
@@ -1583,10 +1434,6 @@ void HelloVrApp::cleanup()
 		if( m_unLensVAO != 0 )
 		{
 			glDeleteVertexArrays( 1, &m_unLensVAO );
-		}
-		if( m_unSceneVAO != 0 )
-		{
-			glDeleteVertexArrays( 1, &m_unSceneVAO );
 		}
 		if( m_unControllerVAO != 0 )
 		{
