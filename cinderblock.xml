@@ -18,6 +18,7 @@
     
 	<platform os="msw">
 		<staticLibrary>openvr/lib/win64/openvr_api.lib</staticLibrary>
+        <buildCopy>lib/openvr_api.dll</buildCopy>
 	</platform>
 </block>
 </cinder>
