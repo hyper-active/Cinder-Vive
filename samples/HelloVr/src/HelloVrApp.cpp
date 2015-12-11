@@ -42,6 +42,9 @@ public:
 	void mouseDown( MouseEvent event ) override;
 	void update() override;
 	void draw() override;
+
+	void finishDraw();
+
 	void cleanup() override;
 	void keyDown( KeyEvent event ) override;
 
@@ -228,6 +231,9 @@ HelloVrApp::HelloVrApp()
 	memset( m_rDevClassChar, 0, sizeof( m_rDevClassChar ) );
 
 	gl::enableVerticalSync( false );
+
+	auto rgl = static_cast<RendererGl *>(getWindow()->getRenderer().get());
+	rgl->setFinishDrawFn( std::bind( &HelloVrApp::finishDraw, this ) );
 
 	// Loading the SteamVR Runtime
 	vr::EVRInitError eError = vr::VRInitError_None;
@@ -1311,6 +1317,8 @@ void HelloVrApp::mouseDown( MouseEvent event )
 
 void HelloVrApp::update()
 {
+	glClearColor( 0, 0, 0, 1 );
+	glClear( GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT );
 	// Process SteamVR events
 	vr::VREvent_t event;
 	while( m_pHMD->PollNextEvent( &event ) )
@@ -1346,34 +1354,6 @@ void HelloVrApp::draw()
 		vr::VRCompositor()->Submit( vr::Eye_Right, &rightEyeTexture );
 	}
 
-	//if( m_bVblank && m_bGlFinishHack )
-	//{
-	//	//$ HACKHACK. From gpuview profiling, it looks like there is a bug where two renders and a present
-	//	// happen right before and after the vsync causing all kinds of jittering issues. This glFinish()
-	//	// appears to clear that up. Temporary fix while I try to get nvidia to investigate this problem.
-	//	// 1/29/2014 mikesart
-	//	glFinish();
-	//}
-
-	//// SwapWindow
-	//{
-	//	SDL_GL_SwapWindow( m_pWindow );
-	//}
-
-	//// Clear
-	//{
-	//	// We want to make sure the glFinish waits for the entire present to complete, not just the submission
-	//	// of the command. So, we do a clear here right here so the glFinish will wait fully for the swap.
-	//	glClearColor( 0, 0, 0, 1 );
-	//	glClear( GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT );
-	//}
-
-	//// Flush and wait for swap.
-	//if( m_bVblank )
-	//{
-	//	glFlush();
-	//	glFinish();
-	//}
 
 	// Spew out the controller and pose count whenever they change.
 	if( m_iTrackedControllerCount != m_iTrackedControllerCount_Last || m_iValidPoseCount != m_iValidPoseCount_Last )
@@ -1382,6 +1362,36 @@ void HelloVrApp::draw()
 		m_iTrackedControllerCount_Last = m_iTrackedControllerCount;
 
 		//CI_LOG_I( "PoseCount:%d(%s) Controllers:%d\n", m_iValidPoseCount, m_strPoseClasses.c_str(), m_iTrackedControllerCount );
+	}
+}
+
+void HelloVrApp::finishDraw()
+{
+	if( m_bVblank && m_bGlFinishHack )
+	{
+		//$ HACKHACK. From gpuview profiling, it looks like there is a bug where two renders and a present
+		// happen right before and after the vsync causing all kinds of jittering issues. This glFinish()
+		// appears to clear that up. Temporary fix while I try to get nvidia to investigate this problem.
+		// 1/29/2014 mikesart
+		glFinish();
+	}
+
+	auto rgl = static_cast<RendererGl *>(getWindow()->getRenderer().get());
+	rgl->swapBuffers();
+
+	// Clear
+	{
+		// We want to make sure the glFinish waits for the entire present to complete, not just the submission
+		// of the command. So, we do a clear here right here so the glFinish will wait fully for the swap.
+		glClearColor( 0, 0, 0, 1 );
+		glClear( GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT );
+	}
+
+	// Flush and wait for swap.
+	if( m_bVblank )
+	{
+		glFlush();
+		glFinish();
 	}
 }
 
