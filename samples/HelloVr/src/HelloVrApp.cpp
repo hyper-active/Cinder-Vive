@@ -5,13 +5,6 @@
 
 #include "openvr.h"
 
-struct Session {
-	Session() { }
-	~Session() {
-		vr::VR_Shutdown();
-	}
-};
-
 using namespace ci;
 using namespace ci::app;
 using namespace std;
@@ -39,6 +32,7 @@ private:
 class HelloVrApp : public App {
 public:
 	HelloVrApp();
+	~HelloVrApp();
 	void mouseDown( MouseEvent event ) override;
 	void update() override;
 	void draw() override;
@@ -80,8 +74,6 @@ public:
 	void SetupRenderModelForTrackedDevice( vr::TrackedDeviceIndex_t unTrackedDeviceIndex );
 	
 	CGLRenderModel *FindOrLoadRenderModel( const char *pchRenderModelName );
-
-	static Session kSession;
 private:
 	bool m_bDebugOpenGL;
 	bool m_bVerbose;
@@ -293,7 +285,16 @@ HelloVrApp::HelloVrApp()
 		CI_LOG_E( "Failed to initialize VR Compositor!" );
 		quit();
 	}
-};
+}
+
+
+HelloVrApp::~HelloVrApp()
+{
+	if( m_pHMD ) {
+		vr::VR_Shutdown();
+		m_pHMD = NULL;
+	}
+}
 
 void APIENTRY DebugCallback( GLenum source, GLenum type, GLuint id, GLenum severity, GLsizei length, const char* message, const void* userParam )
 {
@@ -1397,12 +1398,6 @@ void HelloVrApp::finishDraw()
 
 void HelloVrApp::cleanup()
 {
-	//if( m_pHMD )
-	//{
-	//	//vr::VR_Shutdown();
-	//	m_pHMD = NULL;
-	//}
-
 	for( std::vector< CGLRenderModel * >::iterator i = m_vecRenderModels.begin(); i != m_vecRenderModels.end(); i++ )
 	{
 		delete (*i);
