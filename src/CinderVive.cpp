@@ -4,61 +4,6 @@ using namespace ci;
 using namespace std;
 using namespace hmd;
 
-
-GLuint CompileGLShader( const char *pchShaderName, const char *pchVertexShader, const char *pchFragmentShader )
-{
-	GLuint unProgramID = glCreateProgram();
-
-	GLuint nSceneVertexShader = glCreateShader( GL_VERTEX_SHADER );
-	glShaderSource( nSceneVertexShader, 1, &pchVertexShader, NULL );
-	glCompileShader( nSceneVertexShader );
-
-	GLint vShaderCompiled = GL_FALSE;
-	glGetShaderiv( nSceneVertexShader, GL_COMPILE_STATUS, &vShaderCompiled );
-	if( vShaderCompiled != GL_TRUE )
-	{
-		CI_LOG_I( "%s - Unable to compile vertex shader %d!\n", pchShaderName, nSceneVertexShader );
-		glDeleteProgram( unProgramID );
-		glDeleteShader( nSceneVertexShader );
-		return 0;
-	}
-	glAttachShader( unProgramID, nSceneVertexShader );
-	glDeleteShader( nSceneVertexShader ); // the program hangs onto this once it's attached
-
-	GLuint  nSceneFragmentShader = glCreateShader( GL_FRAGMENT_SHADER );
-	glShaderSource( nSceneFragmentShader, 1, &pchFragmentShader, NULL );
-	glCompileShader( nSceneFragmentShader );
-
-	GLint fShaderCompiled = GL_FALSE;
-	glGetShaderiv( nSceneFragmentShader, GL_COMPILE_STATUS, &fShaderCompiled );
-	if( fShaderCompiled != GL_TRUE )
-	{
-		CI_LOG_I( "%s - Unable to compile fragment shader %d!\n", pchShaderName, nSceneFragmentShader );
-		glDeleteProgram( unProgramID );
-		glDeleteShader( nSceneFragmentShader );
-		return 0;
-	}
-
-	glAttachShader( unProgramID, nSceneFragmentShader );
-	glDeleteShader( nSceneFragmentShader ); // the program hangs onto this once it's attached
-
-	glLinkProgram( unProgramID );
-
-	GLint programSuccess = GL_TRUE;
-	glGetProgramiv( unProgramID, GL_LINK_STATUS, &programSuccess );
-	if( programSuccess != GL_TRUE )
-	{
-		CI_LOG_I( "%s - Error linking program %d!\n", pchShaderName, unProgramID );
-		glDeleteProgram( unProgramID );
-		return 0;
-	}
-
-	glUseProgram( unProgramID );
-	glUseProgram( 0 );
-
-	return unProgramID;
-}
-
 std::string GetTrackedDeviceString( vr::IVRSystem *pHmd, vr::TrackedDeviceIndex_t unDevice, vr::TrackedDeviceProperty prop, vr::TrackedPropertyError *peError = NULL )
 {
 	uint32_t unRequiredBufferLen = pHmd->GetStringTrackedDeviceProperty( unDevice, prop, NULL, 0, peError );
@@ -72,7 +17,7 @@ std::string GetTrackedDeviceString( vr::IVRSystem *pHmd, vr::TrackedDeviceIndex_
 	return sResult;
 }
 
-RenderModel::RenderModel( const std::string & sRenderModelName, const vr::RenderModel_t & vrModel, const vr::RenderModel_TextureMap_t & vrDiffuseTexture )
+RenderModel::RenderModel( const std::string & sRenderModelName, const vr::RenderModel_t & vrModel, const vr::RenderModel_TextureMap_t & vrDiffuseTexture, gl::GlslProgRef shader )
 	: mModelName( sRenderModelName )
 {
 	auto indicesVbo = ci::gl::Vbo::create( GL_ELEMENT_ARRAY_BUFFER, sizeof( uint16_t ) * vrModel.unTriangleCount * 3, vrModel.rIndexData, GL_STATIC_DRAW );
@@ -85,30 +30,7 @@ RenderModel::RenderModel( const std::string & sRenderModelName, const vr::Render
 	ci::Surface8u surface{ const_cast<uint8_t *>(vrDiffuseTexture.rubTextureMapData), vrDiffuseTexture.unWidth, vrDiffuseTexture.unHeight, 4 * vrDiffuseTexture.unWidth, ci::SurfaceChannelOrder::RGBA };
 	mTexture = ci::gl::Texture2d::create( surface );
 
-	//TODO: move outside class
-	auto modelGlsl = ci::gl::GlslProg::create(
-		"#version 410\n"
-		"uniform mat4	ciModelViewProjection;\n"
-		"in vec4		ciPosition;\n"
-		"in vec3		ciNormal;\n"
-		"in vec2		ciTexCoord0;\n"
-		"out vec2		vTexCoord;\n"
-		"void main()\n"
-		"{\n"
-		"	vTexCoord = ciTexCoord0;\n"
-		"	gl_Position = ciModelViewProjection * vec4(ciPosition.xyz, 1);\n"
-		"}\n"
-		,
-		"#version 410\n"
-		"uniform sampler2D	diffuse;\n"
-		"in vec2			vTexCoord;\n"
-		"out vec4			outputColor;\n"
-		"void main()\n"
-		"{\n"
-		"   outputColor = texture( diffuse, vTexCoord );\n"
-		"}\n" );
-
-	mBatch = ci::gl::Batch::create( vboMesh, modelGlsl );
+	mBatch = ci::gl::Batch::create( vboMesh, shader );
 	mBatch->getGlslProg()->uniform( "diffuse", 0 );
 }
 
@@ -122,11 +44,6 @@ void RenderModel::draw()
 HtcVive::HtcVive()
 	: mHMD( nullptr )
 	, m_pRenderModels( nullptr )
-	, mPerf( false )
-	, mVblank( false )
-	, mGlFinishHack( true )
-	, m_unLensProgramID( 0 )
-	, m_unControllerTransformProgramID( 0 )
 	, m_glControllerVertBuffer( 0 )
 	, m_unControllerVAO( 0 )
 	, m_unLensVAO( 0 )
@@ -182,15 +99,6 @@ HtcVive::~HtcVive()
 	glDeleteBuffers( 1, &m_glIDVertBuffer );
 	glDeleteBuffers( 1, &m_glIDIndexBuffer );
 
-	if( m_unControllerTransformProgramID )
-	{
-		glDeleteProgram( m_unControllerTransformProgramID );
-	}
-	if( m_unLensProgramID )
-	{
-		glDeleteProgram( m_unLensProgramID );
-	}
-
 	glDeleteRenderbuffers( 1, &leftEyeDesc.m_nDepthBufferId );
 	glDeleteTextures( 1, &leftEyeDesc.m_nRenderTextureId );
 	glDeleteFramebuffers( 1, &leftEyeDesc.m_nRenderFramebufferId );
@@ -237,7 +145,6 @@ void hmd::HtcVive::update()
 void HtcVive::bind()
 {
 	updateHMDMatrixPose();
-	drawControllers();
 }
 
 void hmd::HtcVive::unbind()
@@ -259,40 +166,7 @@ void hmd::HtcVive::unbind()
 
 void hmd::HtcVive::setupShaders()
 {
-	m_unControllerTransformProgramID = CompileGLShader(
-		"Controller",
-
-		// vertex shader
-		"#version 410\n"
-		"uniform mat4 matrix;\n"
-		"layout(location = 0) in vec4 position;\n"
-		"layout(location = 1) in vec3 v3ColorIn;\n"
-		"out vec4 v4Color;\n"
-		"void main()\n"
-		"{\n"
-		"	v4Color.xyz = v3ColorIn; v4Color.a = 1.0;\n"
-		"	gl_Position = matrix * position;\n"
-		"}\n",
-
-		// fragment shader
-		"#version 410\n"
-		"in vec4 v4Color;\n"
-		"out vec4 outputColor;\n"
-		"void main()\n"
-		"{\n"
-		"   outputColor = v4Color;\n"
-		"}\n"
-		);
-	m_nControllerMatrixLocation = glGetUniformLocation( m_unControllerTransformProgramID, "matrix" );
-	if( m_nControllerMatrixLocation == -1 )
-	{
-		throw ViveExeption{ "Unable to find matrix uniform in controller shader." };
-	}
-
-	m_unLensProgramID = CompileGLShader(
-		"Distortion",
-
-		// vertex shader
+	mGlslLens = gl::GlslProg::create(
 		"#version 410 core\n"
 		"layout(location = 0) in vec4 position;\n"
 		"layout(location = 1) in vec2 v2UVredIn;\n"
@@ -333,6 +207,27 @@ void hmd::HtcVive::setupShaders()
 		"}\n"
 		);
 
+	mGlslModel = ci::gl::GlslProg::create(
+		"#version 410\n"
+		"uniform mat4	ciModelViewProjection;\n"
+		"in vec4		ciPosition;\n"
+		"in vec3		ciNormal;\n"
+		"in vec2		ciTexCoord0;\n"
+		"out vec2		vTexCoord;\n"
+		"void main()\n"
+		"{\n"
+		"	vTexCoord = ciTexCoord0;\n"
+		"	gl_Position = ciModelViewProjection * vec4(ciPosition.xyz, 1);\n"
+		"}\n"
+		,
+		"#version 410\n"
+		"uniform sampler2D	diffuse;\n"
+		"in vec2			vTexCoord;\n"
+		"out vec4			outputColor;\n"
+		"void main()\n"
+		"{\n"
+		"   outputColor = texture( diffuse, vTexCoord );\n"
+		"}\n" );
 }
 
 
@@ -550,101 +445,28 @@ void hmd::HtcVive::setupCompositor()
 	}
 }
 
-void hmd::HtcVive::drawControllers()
+void hmd::HtcVive::renderController( const vr::Hmd_Eye& eye )
 {
-	// don't draw controllers if somebody else has input focus
-	if( mHMD->IsInputFocusCapturedByAnotherProcess() )
-		return;
+	bool inputCapturedByAnotherProcess = mHMD->IsInputFocusCapturedByAnotherProcess();
 
-	std::vector<float> vertdataarray;
-
-	m_uiControllerVertcount = 0;
-	m_iTrackedControllerCount = 0;
-
-	for( vr::TrackedDeviceIndex_t unTrackedDevice = vr::k_unTrackedDeviceIndex_Hmd + 1; unTrackedDevice < vr::k_unMaxTrackedDeviceCount; ++unTrackedDevice )
+	for( uint32_t i = 0; i < vr::k_unMaxTrackedDeviceCount; i++ )
 	{
-		if( ! mHMD->IsTrackedDeviceConnected( unTrackedDevice ) )
+		if( /* ! mTrackedDeviceToRenderModel[i] || */ ! mShowTrackedDevice[i] )
 			continue;
 
-		if( mHMD->GetTrackedDeviceClass( unTrackedDevice ) != vr::TrackedDeviceClass_Controller )
+		const vr::TrackedDevicePose_t & pose = mTrackedDevicePose[i];
+		if( !pose.bPoseIsValid )
 			continue;
 
-		m_iTrackedControllerCount += 1;
-
-		if( ! mTrackedDevicePose[unTrackedDevice].bPoseIsValid )
+		if( inputCapturedByAnotherProcess && mHMD->GetTrackedDeviceClass( i ) == vr::TrackedDeviceClass_Controller )
 			continue;
-
-		const glm::mat4 & mat = mDevicePose[unTrackedDevice];
-
-		glm::vec4 center = mat * glm::vec4( 0, 0, 0, 1 );
-
-		for( int i = 0; i < 3; ++i )
 		{
-			glm::vec3 color( 0, 0, 0 );
-			glm::vec4 point( 0, 0, 0, 1 );
-			point[i] += 0.05f;  // offset in X, Y, Z
-			color[i] = 1.0;  // R, G, B
-			point = mat * point;
-			vertdataarray.push_back( center.x );
-			vertdataarray.push_back( center.y );
-			vertdataarray.push_back( center.z );
-
-			vertdataarray.push_back( color.x );
-			vertdataarray.push_back( color.y );
-			vertdataarray.push_back( color.z );
-
-			vertdataarray.push_back( point.x );
-			vertdataarray.push_back( point.y );
-			vertdataarray.push_back( point.z );
-
-			vertdataarray.push_back( color.x );
-			vertdataarray.push_back( color.y );
-			vertdataarray.push_back( color.z );
-
-			m_uiControllerVertcount += 2;
+			gl::ScopedModelMatrix push;
+			gl::setModelMatrix( mDevicePose[i] );
+			gl::drawCoordinateFrame( 0.3f, 0.06f, 0.01f );
 		}
 
-		glm::vec4 start = mat * glm::vec4( 0, 0, -0.02f, 1 );
-		glm::vec4 end = mat * glm::vec4( 0, 0, -39.f, 1 );
-		glm::vec3 color( .92f, .92f, .71f );
-
-		vertdataarray.push_back( start.x ); vertdataarray.push_back( start.y ); vertdataarray.push_back( start.z );
-		vertdataarray.push_back( color.x ); vertdataarray.push_back( color.y ); vertdataarray.push_back( color.z );
-
-		vertdataarray.push_back( end.x ); vertdataarray.push_back( end.y ); vertdataarray.push_back( end.z );
-		vertdataarray.push_back( color.x ); vertdataarray.push_back( color.y ); vertdataarray.push_back( color.z );
-		m_uiControllerVertcount += 2;
-	}
-
-	// Setup the VAO the first time through.
-	if( m_unControllerVAO == 0 )
-	{
-		glGenVertexArrays( 1, &m_unControllerVAO );
-		glBindVertexArray( m_unControllerVAO );
-
-		glGenBuffers( 1, &m_glControllerVertBuffer );
-		glBindBuffer( GL_ARRAY_BUFFER, m_glControllerVertBuffer );
-
-		GLuint stride = 2 * 3 * sizeof( float );
-		GLuint offset = 0;
-
-		glEnableVertexAttribArray( 0 );
-		glVertexAttribPointer( 0, 3, GL_FLOAT, GL_FALSE, stride, (const void *)offset );
-
-		offset += sizeof( glm::vec3 );
-		glEnableVertexAttribArray( 1 );
-		glVertexAttribPointer( 1, 3, GL_FLOAT, GL_FALSE, stride, (const void *)offset );
-
-		glBindVertexArray( 0 );
-	}
-
-	glBindBuffer( GL_ARRAY_BUFFER, m_glControllerVertBuffer );
-
-	// set vertex data if we have some
-	if( vertdataarray.size() > 0 )
-	{
-		//$ TODO: Use glBufferSubData for this...
-		glBufferData( GL_ARRAY_BUFFER, sizeof( float ) * vertdataarray.size(), &vertdataarray[0], GL_STREAM_DRAW );
+		//mTrackedDeviceToRenderModel[i]->draw(); //TODO: Fix render!
 	}
 }
 
@@ -683,6 +505,7 @@ void hmd::HtcVive::renderStereoTargets( std::function<void( vr::Hmd_Eye )> rende
 		gl::setViewMatrix( m_mat4eyePosLeft * m_mat4HMDPose );
 		gl::setProjectionMatrix( m_mat4ProjectionLeft );
 		renderScene( vr::Eye_Left );
+		renderController( vr::Eye_Left );
 	}
 	glBindFramebuffer( GL_FRAMEBUFFER, 0 );
 
@@ -709,6 +532,7 @@ void hmd::HtcVive::renderStereoTargets( std::function<void( vr::Hmd_Eye )> rende
 		gl::setViewMatrix( m_mat4eyePosRight * m_mat4HMDPose );
 		gl::setProjectionMatrix( m_mat4ProjectionRight );
 		renderScene( vr::Eye_Right );
+		renderController( vr::Eye_Right );
 	}
 	glBindFramebuffer( GL_FRAMEBUFFER, 0 );
 
@@ -731,7 +555,7 @@ void HtcVive::renderDistortion( const ivec2& windowSize )
 	glViewport( 0, 0, windowSize.x, windowSize.y );
 
 	glBindVertexArray( m_unLensVAO );
-	glUseProgram( m_unLensProgramID );
+	glUseProgram( mGlslLens->getHandle() );
 
 	//render left lens (first half of index array )
 	glBindTexture( GL_TEXTURE_2D, leftEyeDesc.m_nResolveTextureId );
@@ -854,7 +678,7 @@ RenderModelRef HtcVive::findOrLoadRenderModel( const std::string& name )
 			return nullptr; // move on to the next tracked device
 		}
 
-		auto model = RenderModel::create( name, *pModel, *pTexture );
+		auto model = RenderModel::create( name, *pModel, *pTexture, mGlslModel );
 		mRenderModels.emplace_back( model );
 
 		vr::VRRenderModels()->FreeRenderModel( pModel );

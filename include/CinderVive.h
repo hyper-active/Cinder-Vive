@@ -10,17 +10,22 @@ namespace hmd {
 
 	class RenderModel {
 	public:
-		static RenderModelRef create( const std::string & name, const vr::RenderModel_t & vrModel, const vr::RenderModel_TextureMap_t & texture ) {
-			return RenderModelRef( new RenderModel{ name, vrModel, texture } );
+		static RenderModelRef create(
+			const std::string & name,
+			const vr::RenderModel_t & vrModel,
+			const vr::RenderModel_TextureMap_t & texture,
+			ci::gl::GlslProgRef shader )
+		{
+			return RenderModelRef( new RenderModel{ name, vrModel, texture, shader } );
 		}
 		void draw();
 		const std::string & GetName() const { return mModelName; }
 	private:
-		RenderModel( const std::string & name, const vr::RenderModel_t & vrModel, const vr::RenderModel_TextureMap_t & texture );
+		RenderModel( const std::string & name, const vr::RenderModel_t & vrModel, const vr::RenderModel_TextureMap_t & texture, ci::gl::GlslProgRef shader );
 
-		ci::gl::BatchRef	mBatch;
-		ci::gl::Texture2dRef mTexture;
-		std::string		mModelName;
+		ci::gl::BatchRef		mBatch;
+		ci::gl::Texture2dRef	mTexture;
+		std::string				mModelName;
 	};
 
 	struct VertexDataLens
@@ -52,7 +57,7 @@ namespace hmd {
 		void bind();
 		void unbind();
 
-		void drawControllers();
+		void renderController( const vr::Hmd_Eye& eye );
 		void renderStereoTargets( std::function<void(vr::Hmd_Eye)> renderScene );
 		void renderDistortion( const glm::ivec2& windowSize );
 
@@ -117,8 +122,8 @@ namespace hmd {
 		glm::mat4 m_mat4ProjectionLeft;
 		glm::mat4 m_mat4ProjectionRight;
 
-		GLuint m_unLensProgramID;
-		GLuint m_unControllerTransformProgramID;
+		ci::gl::GlslProgRef mGlslLens;
+		ci::gl::GlslProgRef mGlslModel;
 
 		GLint m_nControllerMatrixLocation;
 
