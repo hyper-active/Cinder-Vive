@@ -1,4 +1,4 @@
-Cinder-SteamVR
+Cinder-Vive
 ==================
 
-Working toward a SteamVR cinder block, come visit later.
+Work in progress!

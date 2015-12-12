@@ -1,13 +1,13 @@
 <?xml version="1.0" encoding="UTF-8" ?>
 <cinder>
 <block
-	name="Cinder-SteamVR"
-	id="org.libcinder.steamvr"
+	name="Cinder-Vive"
+	id="org.libcinder.vive"
 	author="Eric Renaud-Houde"
 	license="GPL, Commercial"
-	summary="SteamVR wrapper for Cinder"
-	url="https://github.com/num3ric/Cinder-SteamVR"
-	git="git://github.com:num3ric/Cinder-SteamVR.git"
+	summary="HTC Vive VR wrapper for Cinder"
+	url="https://github.com/num3ric/Cinder-Vive"
+	git="git://github.com:num3ric/Cinder-Vive.git"
 	>
 	<supports os="msw"/>
 	<includePath>include</includePath>
