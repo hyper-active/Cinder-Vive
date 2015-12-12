@@ -18,8 +18,6 @@ public:
 	void keyDown( KeyEvent event ) override;
 
 	void finishDraw();
-
-	void setupScene();
 	void renderScene( vr::Hmd_Eye eye );
 private:
 	hmd::HtcViveRef		mVive;
@@ -34,18 +32,13 @@ HelloVrApp::HelloVrApp()
 	auto rgl = static_cast<RendererGl *>(getWindow()->getRenderer().get());
 	rgl->setFinishDrawFn( std::bind( &HelloVrApp::finishDraw, this ) );
 
-	setupScene();
-
 	try {
 		mVive = hmd::HtcVive::create();
 	}
 	catch( const hmd::ViveExeption& exc ) {
 		CI_LOG_E( exc.what() );
 	}
-}
 
-void HelloVrApp::setupScene()
-{
 	GLfloat fLargest;
 	glGetFloatv( GL_MAX_TEXTURE_MAX_ANISOTROPY_EXT, &fLargest );
 	gl::Texture2d::Format fmt;
@@ -53,7 +46,7 @@ void HelloVrApp::setupScene()
 	fmt.mipmap( true );
 	fmt.loadTopDown();
 	mCubeTexture = gl::Texture2d::create( loadImage( loadAsset( "cube_texture.png" ) ), fmt );
-	auto cubeMesh = gl::VboMesh::create( geom::Cube().size( vec3(0.5) ) );
+	auto cubeMesh = gl::VboMesh::create( geom::Cube().size( vec3( 0.5 ) ) );
 
 	mCubeGlsl = gl::GlslProg::create( gl::GlslProg::Format().vertex( loadAsset( "cube.vert" ) ).fragment( loadAsset( "cube.frag" ) ) );
 	mCubeGlsl->uniform( "uTex0", 0 );
@@ -78,9 +71,8 @@ void HelloVrApp::setupScene()
 
 void HelloVrApp::renderScene( vr::Hmd_Eye eye )
 {
-	glClear( GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT );
-	glEnable( GL_DEPTH_TEST );
-
+	gl::clear( GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT );
+	gl::ScopedDepth depth{ true };
 	gl::ScopedTextureBind tex0{ mCubeTexture, 0 };
 	mCubeBatch->drawInstanced( 21 * 21 * 21 );
 }
@@ -94,6 +86,7 @@ void HelloVrApp::update()
 
 void HelloVrApp::draw()
 {
+	gl::clear( Color( 0.15f, 0.15f, 0.18f ) );
 	if( mVive ) {
 		hmd::ScopedVive bind{ mVive };
 		mVive->renderStereoTargets( std::bind( &HelloVrApp::renderScene, this, std::placeholders::_1 ) );
@@ -106,6 +99,7 @@ void HelloVrApp::finishDraw()
 	auto rgl = static_cast<RendererGl *>(getWindow()->getRenderer().get());
 	rgl->swapBuffers();
 
+	// FIXME: Unclear if necessary https://github.com/ValveSoftware/openvr/blob/master/samples/hellovr_opengl/hellovr_opengl_main.cpp#L698
 	glClearColor( 0, 0, 0, 1 );
 	glClear( GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT );
 }

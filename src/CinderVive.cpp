@@ -672,7 +672,6 @@ void HtcVive::processVREvent( const vr::VREvent_t & event )
 
 void hmd::HtcVive::renderStereoTargets( std::function<void( vr::Hmd_Eye )> renderScene )
 {
-	glClearColor( 0.15f, 0.15f, 0.18f, 1.0f ); // nice background color, but not black
 	glEnable( GL_MULTISAMPLE );
 
 	// Left Eye
